@@ -1,0 +1,7 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Fiori;Junio;;;
+FN:Junio Fiori
+TEL;TYPE=CELL:+0000000001
+EMAIL:junio.fiori@example.com
+END:VCARD
