@@ -437,18 +437,19 @@ async def _drop_webhook_if_requested(token: str):
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("Falta el token. Definí TELEGRAM_BOT_TOKEN en .env o variables del sistema.")
+        raise RuntimeError("Falta TELEGRAM_BOT_TOKEN.")
+
+    # Modo: "polling" (local) o "webhook" (Render)
+    mode = os.environ.get("TG_MODE", "polling").strip().lower()
 
     app = ApplicationBuilder().token(token).build()
 
-    # Menú y callbacks
+    # === Handlers (los tuyos existentes) ===
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^MENU:(?!HOME$).+"))
     app.add_handler(CallbackQueryHandler(on_menu_home, pattern=r"^MENU:HOME$"))
     app.add_handler(CallbackQueryHandler(on_page_callback, pattern=r"^PAGE:\d+$"))
-
-    # Comandos tradicionales
     app.add_handler(CommandHandler("get_lista", cmd_get_lista))
     app.add_handler(CommandHandler("get_pendientes", cmd_get_pendientes))
     app.add_handler(CommandHandler("get_aceptados", cmd_get_aceptados))
@@ -456,18 +457,34 @@ def main():
     app.add_handler(CommandHandler("pop_pendientes", cmd_pop_pendientes))
     app.add_handler(CommandHandler("gen_contacts", cmd_gen_contacts))
     app.add_handler(CommandHandler("vcard", cmd_vcard))
-
     app.add_error_handler(handle_error)
 
-    # ✅ Borrar webhook dentro del loop del bot
-    async def post_init(application):
-        if os.environ.get("DROP_WEBHOOK", "").strip() == "1":
-            await application.bot.delete_webhook(drop_pending_updates=True)
-            logging.info("Webhook eliminado (DROP_WEBHOOK=1).")
+    if mode == "webhook":
+        # Render: puerto y URL pública
+        port = int(os.environ.get("PORT", "10000"))
+        public_url = (os.environ.get("PUBLIC_URL") or  # opcional: setear a mano
+                      os.environ.get("RENDER_EXTERNAL_URL") or  # Render la expone por defecto
+                      "").rstrip("/")
+        if not public_url:
+            raise RuntimeError("Falta PUBLIC_URL o RENDER_EXTERNAL_URL para webhook.")
 
-    app.post_init = post_init
+        # Por simplicidad, usamos el token como path
+        webhook_path = "/" + os.environ.get("WEBHOOK_PATH", token)
+        webhook_url = f"{public_url}{webhook_path}"
 
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        # PTB arranca su propio server y setea el webhook al mismo tiempo
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=webhook_path,
+            webhook_url=webhook_url,
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        # Local: polling clásico
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
 
 
 if __name__ == "__main__":
