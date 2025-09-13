@@ -1,4 +1,4 @@
-# bot_unico.py — FLEX+MENU + Google Sheets + Edición de Pendientes
+# bot_unico.py — FLEX+MENU + Google Sheets + Edición de Pendientes + /add con upsert
 # Python 3.10+
 
 import os
@@ -14,19 +14,24 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
 
 # Google Sheets
 import gspread
 from google.oauth2.service_account import Credentials
 
-print("BOT_UNICO VERSION -> FLEX+MENU + SHEETS + EDIT PENDIENTES 1.2")
+print("BOT_UNICO VERSION -> FLEX+MENU + SHEETS + EDIT PENDIENTES + ADD/UPSERT 1.3")
 
 # ============================
 # Cargar .env y logging
@@ -59,6 +64,9 @@ GOOGLE_HEADERS = [
 CSV_DEFAULT = os.environ.get("LISTA_CSV", "lista.csv").strip() or "lista.csv"
 USE_SHEETS = os.environ.get("USE_SHEETS", "1").strip() != "0"
 
+# Estados para /add
+ADD_NOMBRE, ADD_APELLIDO, ADD_TELEFONO, ADD_DNI, ADD_ESTADO = range(5)
+
 # ============================
 # Utilidades texto/CSV
 # ============================
@@ -66,6 +74,16 @@ def _norm(s: str) -> str:
     s = s.strip()
     s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     return s.lower()
+
+def _canon_phone(s: str) -> str:
+    """Solo dígitos para comparar, ignora +, espacios y guiones."""
+    return re.sub(r"\D", "", s or "")
+
+def _clean_phone(s: str) -> str:
+    if not s:
+        return ""
+    s = s.strip().replace(" ", "").replace("-", "")
+    return s
 
 def _read_csv_rows(path: str) -> List[List[str]]:
     if not os.path.exists(path):
@@ -226,6 +244,55 @@ def filter_by_status(rows: List[List[str]], estado: str) -> List[List[str]]:
     return [r for r in rows if len(r) > IDX["Estado"] and r[IDX["Estado"]] == estado]
 
 # ============================
+# UPSERT (evita duplicados por Teléfono o DNI)
+# ============================
+def find_row_index_by_keys(all_rows: List[List[str]], tel: str, dni: str) -> int:
+    ct = _canon_phone(tel)
+    cd = (dni or "").strip()
+    for i, r in enumerate(all_rows):
+        rt = _canon_phone(r[IDX["Teléfono"]] if len(r) > IDX["Teléfono"] else "")
+        rd = (r[IDX["DNI"]] if len(r) > IDX["DNI"] else "").strip()
+        if (ct and rt and ct == rt) or (cd and rd and cd == rd):
+            return i
+    return -1
+
+def upsert_contact_any(row: List[str]) -> str:
+    """
+    row = [Nombre, Apellido, Teléfono, DNI, Estado]
+    Si ya existe por Teléfono o DNI -> actualiza toda la fila.
+    Si no existe -> agrega.
+    Devuelve "updated" o "inserted".
+    """
+    nombre, apellido, telefono, dni, estado = row
+    if USE_SHEETS:
+        ws = _open_sheet()
+        vals = ws.get_all_values()
+        if not vals:
+            ws.update("A1", [CSV_HEADERS])
+            vals = [CSV_HEADERS]
+        body = vals[1:] if len(vals) >= 1 else []
+        idx = find_row_index_by_keys(body, telefono, dni)
+        if idx >= 0:
+            # update en la fila real
+            real_row = idx + 2  # +1 (base-1) +1 encabezado
+            ws.update(f"A{real_row}:E{real_row}", [row])
+            return "updated"
+        else:
+            ws.append_row(row, value_input_option="RAW")
+            return "inserted"
+    else:
+        body = read_lista_csv(CSV_DEFAULT)
+        idx = find_row_index_by_keys(body, telefono, dni)
+        if idx >= 0:
+            body[idx] = row
+            set_lista_csv(CSV_DEFAULT, body)
+            return "updated"
+        else:
+            body.append(row)
+            set_lista_csv(CSV_DEFAULT, body)
+            return "inserted"
+
+# ============================
 # Exportaciones
 # ============================
 def gen_contacts_any(output_csv: str) -> str:
@@ -275,9 +342,7 @@ def _format_persona(row: List[str]) -> str:
         est = row[IDX["Estado"]]   if len(row) > IDX["Estado"]   else ""
         return f"{tel}: {nom}, {ape} - {est}"
     except Exception:
-        # Fallback defensivo por si la fila viene chueca
         return "Fila inválida"
-
 
 # ============================
 # EDITAR ESTADO (solo Pendientes)
@@ -286,31 +351,28 @@ def _col_number_from_idx(idx0: int) -> int:
     return idx0 + 1
 
 def _find_by_keys_fallback(all_rows: List[List[str]], target: List[str]) -> int:
-    """Si la fila cambió levemente, emparejamos por Teléfono o DNI."""
     tel = target[IDX["Teléfono"]].strip()
     dni = target[IDX["DNI"]].strip()
+    ct = _canon_phone(tel)
     for i, r in enumerate(all_rows):
-        if (len(r) > IDX["Teléfono"] and r[IDX["Teléfono"]].strip() == tel) or \
-           (len(r) > IDX["DNI"] and dni and r[IDX["DNI"]].strip() == dni):
+        rt = _canon_phone(r[IDX["Teléfono"]] if len(r) > IDX["Teléfono"] else "")
+        rd = (r[IDX["DNI"]] if len(r) > IDX["DNI"] else "").strip()
+        if (ct and rt and ct == rt) or (dni and rd and dni == rd):
             return i
     return -1
 
 def update_estado_by_row_index(abs_index: int, nuevo_estado: str, base_rows: List[List[str]]) -> None:
-    """
-    abs_index: índice 0-based dentro de 'base_rows' (lista de Pendientes mostrada).
-    Actualiza la celda 'Estado' en la fila real correspondiente.
-    """
     if USE_SHEETS:
         all_rows = read_lista_sheet()
         target = base_rows[abs_index]
         try:
-            real_idx = all_rows.index(target)  # 0-based en body
+            real_idx = all_rows.index(target)  # 0-based
         except ValueError:
             real_idx = _find_by_keys_fallback(all_rows, target)
         if real_idx < 0:
             raise RuntimeError("No se encontró la fila a actualizar (puede haber sido modificada).")
         ws = _open_sheet()
-        row = real_idx + 2  # +1 base-1 +1 encabezado
+        row = real_idx + 2
         col = _col_number_from_idx(IDX["Estado"])
         ws.update_cell(row, col, nuevo_estado)
     else:
@@ -322,8 +384,8 @@ def update_estado_by_row_index(abs_index: int, nuevo_estado: str, base_rows: Lis
             real_idx = _find_by_keys_fallback(rows, target)
         if 0 <= real_idx < len(rows):
             r = rows[real_idx]
-        if len(r) < len(CSV_HEADERS):
-            r = (r + [""] * len(CSV_HEADERS))[:len(CSV_HEADERS)]
+            if len(r) < len(CSV_HEADERS):
+                r = (r + [""] * len(CSV_HEADERS))[:len(CSV_HEADERS)]
             r[IDX["Estado"]] = nuevo_estado
             rows[real_idx] = r
             set_lista_csv(CSV_DEFAULT, rows)
@@ -341,19 +403,19 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔴 Rechazados", callback_data="MENU:FILTRO:Rechazado"),
         ],
         [InlineKeyboardButton("✏️ Cambiar estado (Pendientes)", callback_data="MENU:EDIT")],
+        [InlineKeyboardButton("➕ Agregar contacto", callback_data="MENU:ADD")],
         [InlineKeyboardButton("📤 Exportar Google Contacts (CSV)", callback_data="MENU:EXPORT_GC")],
         [InlineKeyboardButton("🪪 Generar vCard (VCF)", callback_data="MENU:VCARD")],
     ]
     text = f"Elegí una opción:\nBackend: *{backend}*"
     markup = InlineKeyboardMarkup(kb)
 
-    if update.callback_query:  # viene de botón
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
         return
-    if update.message:         # viene de comando /menu
+    if update.message:
         await update.message.reply_text(text, reply_markup=markup, parse_mode="Markdown")
         return
-    # fallback
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id:
         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode="Markdown")
@@ -392,6 +454,12 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pendientes = filter_by_status(read_lista_any(), "Pendiente")
         context.user_data["edit_base_rows"] = pendientes
         return await show_editable_list(q, context, pendientes, title="Cambiar estado (Pendientes)", page=0, page_size=5)
+
+    if data == "MENU:ADD":
+        return await q.edit_message_text(
+            "Para agregar un contacto, escribí el comando:\n\n*/add*\n\nTe voy a pedir los datos paso a paso.",
+            parse_mode="Markdown"
+        )
 
 async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Resultados", page=0, page_size=10):
     total = len(rows)
@@ -559,6 +627,91 @@ async def cmd_vcard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Archivo escrito: {out}")
 
 # ============================
+# Conversación /add con upsert
+# ============================
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["new_contact"] = {}
+    await update.message.reply_text(
+        "Vamos a agregar/actualizar un contacto 👇\n\n1/5) *Nombre*:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ADD_NOMBRE
+
+async def add_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nombre = update.message.text.strip()
+    if not nombre:
+        await update.message.reply_text("El nombre no puede estar vacío. Escribilo de nuevo:")
+        return ADD_NOMBRE
+    context.user_data["new_contact"]["Nombre"] = nombre
+    await update.message.reply_text("2/5) *Apellido*:", parse_mode="Markdown")
+    return ADD_APELLIDO
+
+async def add_apellido(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    apellido = update.message.text.strip()
+    if not apellido:
+        await update.message.reply_text("El apellido no puede estar vacío. Escribilo de nuevo:")
+        return ADD_APELLIDO
+    context.user_data["new_contact"]["Apellido"] = apellido
+    await update.message.reply_text("3/5) *Teléfono* (ej: +54911xxxxxxxx):", parse_mode="Markdown")
+    return ADD_TELEFONO
+
+async def add_telefono(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tel = _clean_phone(update.message.text)
+    if not tel:
+        await update.message.reply_text("El teléfono no puede estar vacío. Ingresalo de nuevo:")
+        return ADD_TELEFONO
+    context.user_data["new_contact"]["Teléfono"] = tel
+    await update.message.reply_text("4/5) *DNI* (podés dejar vacío):", parse_mode="Markdown")
+    return ADD_DNI
+
+async def add_dni(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    dni = (update.message.text or "").strip()
+    context.user_data["new_contact"]["DNI"] = dni
+
+    kb = [["Pendiente", "Aceptado", "Rechazado"]]
+    await update.message.reply_text(
+        "5/5) *Estado* (elegí una opción o escribí):",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True),
+    )
+    return ADD_ESTADO
+
+async def add_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    est_in = (update.message.text or "").strip().lower()
+    if est_in.startswith("acept"):
+        estado = "Aceptado"
+    elif est_in.startswith("rech"):
+        estado = "Rechazado"
+    else:
+        estado = "Pendiente"
+
+    data = context.user_data.get("new_contact", {})
+    row = [
+        data.get("Nombre", ""),
+        data.get("Apellido", ""),
+        data.get("Teléfono", ""),
+        data.get("DNI", ""),
+        estado,
+    ]
+
+    # UPSERT: si existe por Teléfono/DNI actualiza, sino inserta
+    result = upsert_contact_any(row)
+
+    verb = "actualizado" if result == "updated" else "agregado"
+    msg = (
+        f"✅ *Contacto {verb}*\n\n"
+        f"{row[IDX['Teléfono']]}: {row[IDX['Nombre']]}, {row[IDX['Apellido']]} - {row[IDX['Estado']]}"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("Volvé al menú con /menu")
+    return ConversationHandler.END
+
+async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Operación cancelada.", reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
+
+# ============================
 # Errores
 # ============================
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -589,13 +742,29 @@ def main():
     app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^MENU:(?!HOME$).+"))
     app.add_handler(CallbackQueryHandler(on_menu_home, pattern=r"^MENU:HOME$"))
 
-    # Paginación de vista normal (si más adelante querés implementar PAGE)
+    # Paginación de vista normal (placeholder)
     app.add_handler(CallbackQueryHandler(lambda u, c: None, pattern=r"^PAGE:\d+$"))
 
     # Editor de pendientes
     app.add_handler(CallbackQueryHandler(on_edit_page_callback, pattern=r"^EDITPAGE:\d+$"))
     app.add_handler(CallbackQueryHandler(on_edit_pick_row,   pattern=r"^EDIT:\d+$"))
     app.add_handler(CallbackQueryHandler(on_edit_set_state,  pattern=r"^SET:\d+:(Aceptado|Rechazado|Pendiente)$"))
+
+    # Conversación /add con upsert
+    add_conv = ConversationHandler(
+        entry_points=[CommandHandler("add", add_start)],
+        states={
+            ADD_NOMBRE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, add_nombre)],
+            ADD_APELLIDO: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_apellido)],
+            ADD_TELEFONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_telefono)],
+            ADD_DNI:      [MessageHandler(filters.TEXT & ~filters.COMMAND, add_dni)],
+            ADD_ESTADO:   [MessageHandler(filters.TEXT & ~filters.COMMAND, add_estado)],
+        },
+        fallbacks=[CommandHandler("cancel", add_cancel)],
+        name="add_contact_conv",
+        persistent=False,
+    )
+    app.add_handler(add_conv)
 
     # Comandos clásicos
     app.add_handler(CommandHandler("get_lista", cmd_get_lista))
