@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "bot-telegram-fiscalizacion-lla",
+  "private_key_id": "ba9849f9e67975370f91be8ab996ad1ec6b5d1af",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDOOC0RwfxrEyjN\naa3bmh0J7jm1lu9i4rkjORT5Qot8TddE54EjqzQA3UOJeLggSX8OcBifGRRc87Ql\nt8I7zaTMYYtqZGH6Phz6odlcmNxukquq3h2w9q5ewsL51o0u4i8Z8jHvFDYjkIMA\n/3oNZvjPYo3zhyn2JofLBzrRjS3d8nggHl1oEWW0AWgUXO/nhvnlNvt09sm6DIsL\nSm7nO4BBPRrRhwgdsyQPgr5iv36tXBFmC/hiKyk+Qmnc4SEn9EK8IRtwly5jJpc5\nph1RgC351UbCSJpzjF65yFsclnWJ/vIlKdfSx/kaKHuFNzuz1H6/DvSvbOSe1GLx\nMEOdoAHRAgMBAAECggEABXUYYT7NXa6OPwBn1tbRY6rDqXX2/BqUrHVVZCLSEu4y\n7xqC0QU1/TtdzxCsK8OSKplGF4jIAI09BF4EdIV00elXcY96Rc94wBvCJziO5di5\nFQ6ngcBHfU/Bbe/zAM2A0lqV3nY+GAsaIm/AZMQnu8JHkC0wq7hZkeKNOJA4SWY2\nBQHpj0Y3rwvMwUy5nuqnRU8CBhyTG0jhqUZqIBwvo7K21ekVlx1XbeoD/VCfLgsi\ncfL43yeuQYVBTobcmKJMTbRfRJCCy1a0HEpWX/EAQwwmAMn3VDVJVNRv3OVXhHwF\n7U2Azr5jg/SOUHNnu50UJO1FIdhOJy9hwm2StKqSmQKBgQDniuv//K+4/IY1XvKN\nV5VabGQqI9RXH3sg4ABtwrpEJjiYR/W0N1YbclgknZFIr5myC+u2QGFrX3Sw0584\nldnqt0TrRR6qXkqbU4VMinkP3Brr+dwX+D4pBk2Rm1+sDVGzAxK96qZksR9b04ZF\nz+AJOqOH1lRFcpFwF4ii7/oA6QKBgQDkAH8EQf5AWu+rEJBP+u83Fb2IN5DvBHmy\nB2kEEpSSKDZ8ubw02vPgx1C7x+6AlJnDw/hSM7bTHS7Vpenv4LLwMqpD68/93pfo\nyQCrPrc77MYQLbPzbZRtJV8eslqvm7RTgnxXSrhIGpLj81erjQHfEkw8NtCzw9hj\nE1GXh0koqQKBgGt1vjIARE3GZUM/3bJbg6WDyLkGB/anVa3cSFaomWonkvyZ6R7K\nz9vNJbtYpaTmWp6Xib38AzqiArZOgQbyBUE57XKDkcfgGyAbkzIC0kzaCmSagdte\nCvtfQYDia3SeedxrALfDv5Xb3oHvmdGsuH2QCXVxs4rHsVgkk/WLCqyBAoGBAL6C\nS59bJP7Q/QGKzYqGuerlF4ECLPAKZUUEPBNTEyEsyJpe94uSh8SBxkuhOv/lKrYQ\nwSSuYUz1TXTnNRliPyHEs9Ac8aXGoFe52/06YhCIPta12W7FWQf5+gjELlIdYAeH\nOC4YGPLmgWZGpjKJl860k06c3rXWJrBiLALY36BBAoGAVWvomfrhKUQOQYv+lOZ6\nj0Q1eGBPAhLeYLI2jnuU4xnTfBuw1vKph2+NVBBzpAlG9CqT8ATbAyh3/DIhKyTR\nRBwx8UfDMQQBEnOqzxdTfqzBKs4TkV9hgwNmJpZFjlmntzs/W+O5LHlKlLclc8Vn\nfpL7Wx5UNGELRMbTpg+foMM=\n-----END PRIVATE KEY-----\n",
+  "client_email": "bot-tm-fiscalizacion-lla@bot-telegram-fiscalizacion-lla.iam.gserviceaccount.com",
+  "client_id": "115877320787850824466",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bot-tm-fiscalizacion-lla%40bot-telegram-fiscalizacion-lla.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
