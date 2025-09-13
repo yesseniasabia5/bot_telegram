@@ -1,4 +1,4 @@
-# bot_unico.py — FLEX+MENU + Google Sheets backend
+# bot_unico.py — FLEX+MENU + Google Sheets + Edición de Pendientes
 # Python 3.10+
 
 import os
@@ -11,11 +11,14 @@ from typing import List, Optional
 
 from dotenv import load_dotenv
 from telegram import (
-    Update, Bot,
-    InlineKeyboardButton, InlineKeyboardMarkup,
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
     ContextTypes,
 )
 
@@ -23,7 +26,7 @@ from telegram.ext import (
 import gspread
 from google.oauth2.service_account import Credentials
 
-print("BOT_UNICO VERSION -> FLEX+MENU + SHEETS 1.0")
+print("BOT_UNICO VERSION -> FLEX+MENU + SHEETS + EDIT PENDIENTES 1.2")
 
 # ============================
 # Cargar .env y logging
@@ -65,6 +68,8 @@ def _norm(s: str) -> str:
     return s.lower()
 
 def _read_csv_rows(path: str) -> List[List[str]]:
+    if not os.path.exists(path):
+        return []
     with open(path, mode="r", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         return [row for row in reader]
@@ -137,21 +142,27 @@ SCOPES = [
 ]
 
 def _gspread_client():
-    sa_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
-    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    sa_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
-    if sa_file and os.path.exists(sa_file):
-        # Caso 1: usás archivo físico
+    if sa_file:
+        if not os.path.exists(sa_file):
+            raise RuntimeError(f"GOOGLE_SERVICE_ACCOUNT_FILE apunta a un archivo que no existe: {sa_file}")
         creds = Credentials.from_service_account_file(sa_file, scopes=SCOPES)
-    elif sa_json:
-        # Caso 2: usás JSON en variable de entorno (Render, etc.)
-        info = json.loads(sa_json)
+        return gspread.authorize(creds)
+
+    if sa_json:
+        try:
+            info = json.loads(sa_json)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                "GOOGLE_SERVICE_ACCOUNT_JSON no es un JSON válido "
+                "(si pegaste un nombre de archivo, usá GOOGLE_SERVICE_ACCOUNT_FILE)."
+            ) from e
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    else:
-        raise RuntimeError("Falta GOOGLE_SERVICE_ACCOUNT_FILE o GOOGLE_SERVICE_ACCOUNT_JSON")
+        return gspread.authorize(creds)
 
-    return gspread.authorize(creds)
-
+    raise RuntimeError("Falta GOOGLE_SERVICE_ACCOUNT_FILE o GOOGLE_SERVICE_ACCOUNT_JSON")
 
 def _open_sheet():
     gsid = os.environ.get("GSHEET_ID")
@@ -257,7 +268,65 @@ def _chunk_rows(rows: List[List[str]], size: int = 10):
         yield rows[i:i+size]
 
 def _format_persona(row: List[str]) -> str:
-    return f"{row[IDX['Teléfono']]}: {row[IDX['Nombre']]}, {row[IDX['Apellido']]} - {row[IDX['Estado']]}"
+    try:
+        tel = row[IDX["Teléfono"]] if len(row) > IDX["Teléfono"] else ""
+        nom = row[IDX["Nombre"]]   if len(row) > IDX["Nombre"]   else ""
+        ape = row[IDX["Apellido"]] if len(row) > IDX["Apellido"] else ""
+        est = row[IDX["Estado"]]   if len(row) > IDX["Estado"]   else ""
+        return f"{tel}: {nom}, {ape} - {est}"
+    except Exception:
+        # Fallback defensivo por si la fila viene chueca
+        return "Fila inválida"
+
+
+# ============================
+# EDITAR ESTADO (solo Pendientes)
+# ============================
+def _col_number_from_idx(idx0: int) -> int:
+    return idx0 + 1
+
+def _find_by_keys_fallback(all_rows: List[List[str]], target: List[str]) -> int:
+    """Si la fila cambió levemente, emparejamos por Teléfono o DNI."""
+    tel = target[IDX["Teléfono"]].strip()
+    dni = target[IDX["DNI"]].strip()
+    for i, r in enumerate(all_rows):
+        if (len(r) > IDX["Teléfono"] and r[IDX["Teléfono"]].strip() == tel) or \
+           (len(r) > IDX["DNI"] and dni and r[IDX["DNI"]].strip() == dni):
+            return i
+    return -1
+
+def update_estado_by_row_index(abs_index: int, nuevo_estado: str, base_rows: List[List[str]]) -> None:
+    """
+    abs_index: índice 0-based dentro de 'base_rows' (lista de Pendientes mostrada).
+    Actualiza la celda 'Estado' en la fila real correspondiente.
+    """
+    if USE_SHEETS:
+        all_rows = read_lista_sheet()
+        target = base_rows[abs_index]
+        try:
+            real_idx = all_rows.index(target)  # 0-based en body
+        except ValueError:
+            real_idx = _find_by_keys_fallback(all_rows, target)
+        if real_idx < 0:
+            raise RuntimeError("No se encontró la fila a actualizar (puede haber sido modificada).")
+        ws = _open_sheet()
+        row = real_idx + 2  # +1 base-1 +1 encabezado
+        col = _col_number_from_idx(IDX["Estado"])
+        ws.update_cell(row, col, nuevo_estado)
+    else:
+        rows = read_lista_csv(CSV_DEFAULT)
+        target = base_rows[abs_index]
+        try:
+            real_idx = rows.index(target)
+        except ValueError:
+            real_idx = _find_by_keys_fallback(rows, target)
+        if 0 <= real_idx < len(rows):
+            r = rows[real_idx]
+        if len(r) < len(CSV_HEADERS):
+            r = (r + [""] * len(CSV_HEADERS))[:len(CSV_HEADERS)]
+            r[IDX["Estado"]] = nuevo_estado
+            rows[real_idx] = r
+            set_lista_csv(CSV_DEFAULT, rows)
 
 # ============================
 # Bot: comandos y callbacks
@@ -271,16 +340,28 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🟢 Aceptados", callback_data="MENU:FILTRO:Aceptado"),
             InlineKeyboardButton("🔴 Rechazados", callback_data="MENU:FILTRO:Rechazado"),
         ],
+        [InlineKeyboardButton("✏️ Cambiar estado (Pendientes)", callback_data="MENU:EDIT")],
         [InlineKeyboardButton("📤 Exportar Google Contacts (CSV)", callback_data="MENU:EXPORT_GC")],
         [InlineKeyboardButton("🪪 Generar vCard (VCF)", callback_data="MENU:VCARD")],
     ]
-    await update.message.reply_text(
-        f"Elegí una opción:\nBackend: *{backend}*",
-        reply_markup=InlineKeyboardMarkup(kb),
-        parse_mode="Markdown",
-    )
+    text = f"Elegí una opción:\nBackend: *{backend}*"
+    markup = InlineKeyboardMarkup(kb)
+
+    if update.callback_query:  # viene de botón
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
+        return
+    if update.message:         # viene de comando /menu
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="Markdown")
+        return
+    # fallback
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id:
+        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode="Markdown")
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_menu(update, context)
+
+async def on_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_menu(update, context)
 
 async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -307,18 +388,18 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gen_vcard_any(out, etiqueta="General")
         return await q.edit_message_text(f"✅ Generado vCard: `{out}`", parse_mode="Markdown")
 
+    if data == "MENU:EDIT":
+        pendientes = filter_by_status(read_lista_any(), "Pendiente")
+        context.user_data["edit_base_rows"] = pendientes
+        return await show_editable_list(q, context, pendientes, title="Cambiar estado (Pendientes)", page=0, page_size=5)
+
 async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Resultados", page=0, page_size=10):
     total = len(rows)
     if total == 0:
         return await q.edit_message_text(f"Sin resultados en *{title}*.", parse_mode="Markdown")
 
-    context.user_data["rows"] = rows
-    context.user_data["title"] = title
-    context.user_data["page_size"] = page_size
-
     pages = list(_chunk_rows(rows, page_size))
     page = max(0, min(page, len(pages)-1))
-    context.user_data["page"] = page
 
     body = [_format_persona(r) for r in pages[page]]
 
@@ -334,33 +415,101 @@ async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Re
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body)
     return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
-async def on_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==== Editor de Pendientes ====
+async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar estado", page=0, page_size=5):
+    total = len(rows)
+    if total == 0:
+        return await q.edit_message_text("No hay pendientes para editar.")
+
+    context.user_data["edit_page_size"] = page_size
+    pages = list(_chunk_rows(rows, page_size))
+    page = max(0, min(page, len(pages)-1))
+    context.user_data["edit_page"] = page
+
+    start_index = page * page_size
+    body_lines = []
+    kb_rows = []
+
+    for i, row in enumerate(pages[page]):
+        abs_idx = start_index + i
+        linea = _format_persona(row)
+        body_lines.append(f"{abs_idx+1:>3}. {linea}")
+        kb_rows.append([InlineKeyboardButton(f"✏️ Cambiar #{abs_idx+1}", callback_data=f"EDIT:{abs_idx}")])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"EDITPAGE:{page-1}"))
+    if page < len(pages)-1:
+        nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"EDITPAGE:{page+1}"))
+    if nav:
+        kb_rows.append(nav)
+
+    kb_rows.append([InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
+
+    text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body_lines)
+    return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb_rows), parse_mode="Markdown")
+
+async def on_edit_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     _, page_str = q.data.split(":", 1)
     page = int(page_str)
-    rows = context.user_data.get("rows", [])
-    title = context.user_data.get("title", "Resultados")
-    size = context.user_data.get("page_size", 10)
-    return await show_rows_with_pagination(q, context, rows, title=title, page=page, page_size=size)
+    base_rows = context.user_data.get("edit_base_rows", [])
+    size = context.user_data.get("edit_page_size", 5)
+    return await show_editable_list(q, context, base_rows, title="Cambiar estado (Pendientes)", page=page, page_size=size)
 
-async def on_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_edit_pick_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    backend = "Google Sheets" if USE_SHEETS else f"CSV ({CSV_DEFAULT})"
-    kb = [
-        [InlineKeyboardButton("📋 Ver lista", callback_data="MENU:LISTA")],
-        [
-            InlineKeyboardButton("🟡 Pendientes", callback_data="MENU:FILTRO:Pendiente"),
-            InlineKeyboardButton("🟢 Aceptados", callback_data="MENU:FILTRO:Aceptado"),
-            InlineKeyboardButton("🔴 Rechazados", callback_data="MENU:FILTRO:Rechazado"),
-        ],
-        [InlineKeyboardButton("📤 Exportar Google Contacts (CSV)", callback_data="MENU:EXPORT_GC")],
-        [InlineKeyboardButton("🪪 Generar vCard (VCF)", callback_data="MENU:VCARD")],
-    ]
-    await q.edit_message_text(f"Elegí una opción:\nBackend: *{backend}*", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    _, idx_str = q.data.split(":", 1)
+    abs_idx = int(idx_str)
+    base_rows = context.user_data.get("edit_base_rows", [])
+    if not (0 <= abs_idx < len(base_rows)):
+        return await q.edit_message_text("Índice inválido. Volvé a intentarlo desde el menú.")
 
-# Comandos “texto” tradicionales (por si los usás)
+    persona = _format_persona(base_rows[abs_idx])
+    kb = [
+        [
+            InlineKeyboardButton("🟢 Aceptado", callback_data=f"SET:{abs_idx}:Aceptado"),
+            InlineKeyboardButton("🔴 Rechazado", callback_data=f"SET:{abs_idx}:Rechazado"),
+            InlineKeyboardButton("🟡 Pendiente", callback_data=f"SET:{abs_idx}:Pendiente"),
+        ],
+        [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME"),
+         InlineKeyboardButton("↩️ Volver", callback_data=f"EDITPAGE:{context.user_data.get('edit_page',0)}")],
+    ]
+    return await q.edit_message_text(
+        f"Elegiste:\n\n{persona}\n\n¿Nuevo estado?",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def on_edit_set_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    _, idx_str, nuevo = q.data.split(":", 2)
+    abs_idx = int(idx_str)
+
+    base_rows = context.user_data.get("edit_base_rows", [])
+    if not (0 <= abs_idx < len(base_rows)):
+        return await q.edit_message_text("Índice inválido. Volvé a intentarlo desde el menú.")
+
+    update_estado_by_row_index(abs_idx, nuevo, base_rows)
+
+    new_pendientes = filter_by_status(read_lista_any(), "Pendiente")
+    context.user_data["edit_base_rows"] = new_pendientes
+
+    page = context.user_data.get("edit_page", 0)
+    size = context.user_data.get("edit_page_size", 5)
+    total_pages = max(1, (len(new_pendientes) + size - 1) // size)
+    if page >= total_pages:
+        page = max(0, total_pages - 1)
+    context.user_data["edit_page"] = page
+
+    await q.edit_message_text(f"✅ Estado actualizado a *{nuevo}*.", parse_mode="Markdown")
+    return await show_editable_list(q, context, new_pendientes, title="Cambiar estado (Pendientes)", page=page, page_size=size)
+
+# ============================
+# Comandos “texto” clásicos
+# ============================
 async def cmd_get_lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = read_lista_any()
     if not rows:
@@ -399,23 +548,6 @@ async def cmd_get_rechazados(update: Update, context: ContextTypes.DEFAULT_TYPE)
     rows = read_lista_any()
     return await _send_list_by_status(update, filter_by_status(rows, "Rechazado"), "Rechazadas")
 
-async def cmd_pop_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) < 3:
-        return await update.message.reply_text("Uso: /pop_pendientes <Nombre> <Apellido> <Telefono> [Aceptado|Rechazado]")
-    nombre, apellido, telefono = args[0], args[1], args[2]
-    nuevo_estado = "Aceptado" if len(args) < 4 else ("Aceptado" if args[3] == "Aceptado" else "Rechazado")
-    rows = read_lista_any()
-    buscando = [nombre, apellido, telefono, "Pendiente"]
-    poniendo = [nombre, apellido, telefono, nuevo_estado]
-    if buscando in rows:
-        rows.remove(buscando)
-        rows.append(poniendo)
-        set_lista_any(rows)
-        await update.message.reply_text(f"Actualizado ▶️ {' '.join(buscando[:3])} → {nuevo_estado}")
-    else:
-        await update.message.reply_text("No se encontró a la persona en Pendiente. Verificá los datos.")
-
 async def cmd_gen_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out = os.path.join("export", "contacts.csv")
     gen_contacts_any(out)
@@ -451,30 +583,41 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    # Handlers
+    # Menú + callbacks
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CallbackQueryHandler(on_menu_callback, pattern=r"^MENU:(?!HOME$).+"))
     app.add_handler(CallbackQueryHandler(on_menu_home, pattern=r"^MENU:HOME$"))
-    app.add_handler(CallbackQueryHandler(on_page_callback, pattern=r"^PAGE:\d+$"))
 
+    # Paginación de vista normal (si más adelante querés implementar PAGE)
+    app.add_handler(CallbackQueryHandler(lambda u, c: None, pattern=r"^PAGE:\d+$"))
+
+    # Editor de pendientes
+    app.add_handler(CallbackQueryHandler(on_edit_page_callback, pattern=r"^EDITPAGE:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_edit_pick_row,   pattern=r"^EDIT:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_edit_set_state,  pattern=r"^SET:\d+:(Aceptado|Rechazado|Pendiente)$"))
+
+    # Comandos clásicos
     app.add_handler(CommandHandler("get_lista", cmd_get_lista))
     app.add_handler(CommandHandler("get_pendientes", cmd_get_pendientes))
     app.add_handler(CommandHandler("get_aceptados", cmd_get_aceptados))
     app.add_handler(CommandHandler("get_rechazados", cmd_get_rechazados))
-    app.add_handler(CommandHandler("pop_pendientes", cmd_pop_pendientes))
     app.add_handler(CommandHandler("gen_contacts", cmd_gen_contacts))
     app.add_handler(CommandHandler("vcard", cmd_vcard))
 
     app.add_error_handler(handle_error)
 
+    # Si falta URL pública en modo webhook, caemos a polling
     if mode == "webhook":
         port = int(os.environ.get("PORT", "10000"))
         public_url = (os.environ.get("PUBLIC_URL")
                       or os.environ.get("RENDER_EXTERNAL_URL")
                       or "").rstrip("/")
         if not public_url:
-            raise RuntimeError("Falta PUBLIC_URL o RENDER_EXTERNAL_URL para webhook.")
+            logging.warning("No hay PUBLIC_URL/RENDER_EXTERNAL_URL; cambiando a polling automáticamente.")
+            mode = "polling"
+
+    if mode == "webhook":
         webhook_path = "/" + os.environ.get("WEBHOOK_PATH", token)
         webhook_url = f"{public_url}{webhook_path}"
         app.run_webhook(
