@@ -1,6 +1,6 @@
 from typing import List
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from bot.auth import require_auth, get_display_for_uid
@@ -8,11 +8,17 @@ from bot.config import CSV_HEADERS, IDX
 from bot.services.lista import read_lista_any, set_lista_any, filter_by_status, _pad_row
 from bot.services.exports import gen_contacts_any, gen_vcard_any
 
+
+
+def _reply_with_menu(message, text):
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")]])
+    return message.reply_text(text, reply_markup=keyboard)
+
 @require_auth
 async def cmd_get_lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = read_lista_any()
     if not rows:
-        return await update.message.reply_text("La lista está vacía.")
+        return await _reply_with_menu(update.message, "La lista está vacía.")
     block = []
     for i, r in enumerate(rows, 1):
         r = _pad_row(r, len(CSV_HEADERS))
@@ -25,7 +31,7 @@ async def cmd_get_lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _send_list_by_status(update: Update, rows: List[List[str]], titulo: str):
     if not rows:
-        return await update.message.reply_text(f"No hay personas {titulo.lower()}.")
+        return await _reply_with_menu(update.message, f"No hay personas {titulo.lower()}.")
     await update.message.reply_text(f"Esta es la lista de personas {titulo.lower()}:")
     block = []
     for i, r in enumerate(rows, 1):
@@ -42,7 +48,7 @@ async def cmd_get_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE)
     all_rows = read_lista_any()
     pendientes = filter_by_status(all_rows, "Pendiente")
     if not pendientes:
-        return await update.message.reply_text("No hay personas pendientes.")
+        return await _reply_with_menu(update.message, "No hay personas pendientes.")
     uid = update.effective_user.id if update.effective_user else 0
     who = get_display_for_uid(uid, update)
     to_assign = pendientes[:5]

@@ -166,6 +166,7 @@ async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar e
         nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"EDITPAGE:{page+1}"))
     if nav:
         kb_rows.append(nav)
+    kb_rows.append([InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")])
     kb_rows.append([InlineKeyboardButton("↩️ Volver", callback_data="MENU:HOME"),
                     InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body_lines)

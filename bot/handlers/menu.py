@@ -340,7 +340,8 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not pending_positions:
                 context.user_data.pop("reserved_owner", None)
                 context.user_data.pop("pending_preview_indices", None)
-                return await q.edit_message_text("No hay personas pendientes.")
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")]])
+                return await q.edit_message_text("No hay personas pendientes.", reply_markup=kb)
             preview_positions = pending_positions[:5]
             preview = [row for _, row in preview_positions]
             context.user_data["pending_preview_keys"] = [_row_key(r) for r in preview]
