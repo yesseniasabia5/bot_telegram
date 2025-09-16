@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import List
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 from bot.auth import require_auth, get_display_for_uid
@@ -170,7 +171,12 @@ async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar e
     kb_rows.append([InlineKeyboardButton("↩️ Volver", callback_data="MENU:HOME"),
                     InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body_lines)
-    return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb_rows), parse_mode="Markdown")
+    try:
+        return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb_rows), parse_mode="Markdown")
+    except BadRequest as exc:
+        if "Message is not modified" in str(exc):
+            return None
+        raise
 
 
 @require_auth

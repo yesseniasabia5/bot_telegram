@@ -138,7 +138,11 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"Bienvenido!!"
     markup = InlineKeyboardMarkup(kb)
     if getattr(update, "callback_query", None):
-        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
+        except BadRequest as exc:
+            if "Message is not modified" not in str(exc):
+                raise
     elif getattr(update, "message", None):
         await update.message.reply_text(text, reply_markup=markup, parse_mode="Markdown")
 
@@ -291,7 +295,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✅ Sí, liberar", callback_data="MENU:CANCEL_CONFIRM"),
              InlineKeyboardButton("❌ No", callback_data="MENU:CANCEL_KEEP")],
         ]
-        return await q.edit_message_text("¿Querés liberar esta tanda y devolverla a *Pendiente*?",
+        return await q.edit_message_text("¿Querés liberar el resto de la tanda y devolverla a *Pendiente*?",
                                          reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     if data == "MENU:CANCEL_CONFIRM":
