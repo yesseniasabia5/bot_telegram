@@ -175,7 +175,8 @@ async def start_list_pagination(q, context, rows: List[List[str]], title: str, p
 
 async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Resultados", page=0, page_size=10, allow_edit=True):
     if not rows:
-        return await q.edit_message_text(f"Sin resultados en *{title}*.", parse_mode="Markdown")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")]])
+        return await q.edit_message_text(f"Sin resultados en *{title}*.", reply_markup=kb, parse_mode="Markdown")
     pages = list(_chunk_rows(rows, page_size))
     page = max(0, min(page, len(pages)-1))
     body = [_format_persona(r) for r in pages[page]]
