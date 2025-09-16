@@ -3,7 +3,3 @@ requests>=2.31.0
 python-dotenv>=1.0.1
 gspread>=6.0.0
 google-auth>=2.29.0
-python-telegram-bot[webhooks]==21.6
-gspread==6.1.4
-google-auth==2.33.0
-python-dotenv==1.0.1
