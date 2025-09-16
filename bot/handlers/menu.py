@@ -13,6 +13,79 @@ from bot.services.exports import gen_contacts_any, gen_vcard_any
 from bot.utils.pagination import _chunk_rows, _format_persona
 from bot.handlers.edit import show_editable_list, release_reservation
 
+
+def _current_user_label(update: Update) -> str:
+    uid = update.effective_user.id if update.effective_user else None
+    if uid is None:
+        return "Sin usuario"
+    uid_str = str(uid)
+    display = get_display_for_uid(uid, update) or ""
+    return f"{uid_str} ({display})" if display and display != uid_str else uid_str
+
+
+def _row_key(row):
+    padded = _pad_row(row, len(CSV_HEADERS))
+    return {"tel": padded[IDX["Teléfono"]].strip(), "dni": padded[IDX["DNI"]].strip()}
+
+
+def _matches_key(row, key) -> bool:
+    if not key:
+        return False
+    padded = _pad_row(row, len(CSV_HEADERS))
+    tel = padded[IDX["Teléfono"]].strip()
+    dni = padded[IDX["DNI"]].strip()
+    key_tel = (key.get("tel") or "").strip()
+    key_dni = (key.get("dni") or "").strip()
+    if key_tel and tel == key_tel:
+        return True
+    if key_dni and dni == key_dni:
+        return True
+    return False
+
+
+def _reserve_pendientes_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, limit: int = 5) -> List[List[str]]:
+    preferred_keys = context.user_data.get("pending_preview_keys") or []
+    all_rows = read_lista_any()
+    pendientes = filter_by_status(all_rows, "Pendiente")
+    if not pendientes:
+        return []
+    max_items = min(limit, len(pendientes)) if limit else len(pendientes)
+    selected = []
+    used_indexes = set()
+    for key in preferred_keys:
+        for idx, row in enumerate(pendientes):
+            if idx in used_indexes:
+                continue
+            if _matches_key(row, key):
+                selected.append(row)
+                used_indexes.add(idx)
+                if len(selected) >= max_items:
+                    break
+        if len(selected) >= max_items:
+            break
+    if len(selected) < max_items:
+        for idx, row in enumerate(pendientes):
+            if idx in used_indexes:
+                continue
+            selected.append(row)
+            used_indexes.add(idx)
+            if len(selected) >= max_items:
+                break
+    if not selected:
+        return []
+    who = _current_user_label(update)
+    for row in selected:
+        if len(row) < len(CSV_HEADERS):
+            row.extend([""] * (len(CSV_HEADERS) - len(row)))
+        row[IDX["Estado"]] = f"En contacto - {who}"
+        row[IDX["Observación"]] = ""
+    set_lista_any(all_rows)
+    context.user_data["reserved_rows"] = selected
+    context.user_data.pop("pending_preview_keys", None)
+    context.user_data.pop("pending_preview_limit", None)
+    return selected
+
+
 @require_auth
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # al volver al menú, devolvemos reservas sin procesar
@@ -208,32 +281,38 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, _, estado = data.split(":", 2)
 
         if estado == "Pendiente":
+            reserved = context.user_data.get("reserved_rows") or []
+            if reserved:
+                context.user_data.pop("pending_preview_keys", None)
+                context.user_data.pop("pending_preview_limit", None)
+                msg = "\n".join(_format_persona(r) for r in reserved)
+                kb = [
+                    [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
+                    [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+                    [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
+                    [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
+                ]
+                return await q.edit_message_text(
+                    f"Tus pendientes asignados ({len(reserved)}):\n\n{msg}",
+                    reply_markup=InlineKeyboardMarkup(kb),
+                )
             all_rows = read_lista_any()
             pendientes = filter_by_status(all_rows, "Pendiente")
             if not pendientes:
                 return await q.edit_message_text("No hay personas pendientes.")
-            uid = update.effective_user.id if update.effective_user else 0
-            display = get_display_for_uid(uid, update)
-            who = str(uid)
-            if display and display != str(uid):
-                who = f"{uid} ({display})"
-            to_assign = pendientes[:5]
-            for r in to_assign:
-                # r es referencia a filas de all_rows (vienen de filter_by_status),
-                # modificar en lugar sin reasignar para persistir en all_rows
-                r[IDX["Estado"]] = f"En contacto - {who}"
-                r[IDX["Observación"]] = ""
-            set_lista_any(all_rows)
-            context.user_data["reserved_rows"] = to_assign
-            msg = "\n".join(_format_persona(r) for r in to_assign)
+            preview = pendientes[:5]
+            context.user_data["pending_preview_keys"] = [_row_key(r) for r in preview]
+            context.user_data["pending_preview_limit"] = len(preview)
+            msg = "\n".join(_format_persona(r) for r in preview)
             kb = [
                 [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
-                [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
-                [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
                 [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
             ]
-            return await q.edit_message_text(f"Tus pendientes asignados (5):\n\n{msg}",
-                                             reply_markup=InlineKeyboardMarkup(kb))
+            texto = (
+                f"Próxima tanda disponible ({len(preview)}):\n\n{msg}\n\n"
+                'Tocá "Editar esta tanda" para reservarla.'
+            )
+            return await q.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(kb))
         else:
             rows = filter_by_status(read_lista_any(), estado)
             return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0)
@@ -260,16 +339,17 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "MENU:EDIT":
         base = context.user_data.get("reserved_rows")
-        if base:
-            pendientes = base
-        else:
-            pendientes = filter_by_status(read_lista_any(), "Pendiente")
-        context.user_data["edit_base_rows"] = pendientes
+        if not base:
+            limit = context.user_data.get("pending_preview_limit") or 5
+            base = _reserve_pendientes_for_user(update, context, limit=limit)
+        if not base:
+            return await q.edit_message_text("No hay pendientes disponibles para reservar en este momento.")
+        context.user_data["edit_base_rows"] = base
         context.user_data["edit_page_size"] = 5
         context.user_data["edit_page"] = 0
         context.user_data["edit_source"] = "pendientes"
         context.user_data["edit_title"] = "Cambiar estado (Pendientes)"
-        return await show_editable_list(q, context, pendientes, title=context.user_data["edit_title"], page=0, page_size=5)
+        return await show_editable_list(q, context, base, title=context.user_data["edit_title"], page=0, page_size=5)
 
     # Fallback no-op
     return None
