@@ -331,7 +331,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = "\n".join(_format_persona(r) for r in reserved)
                 kb = [
                     [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
-                    [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+                    [InlineKeyboardButton("📱 Guardar contacto", callback_data="MENU:SENDCONTACTS")],
                     [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
                     [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
                 ]

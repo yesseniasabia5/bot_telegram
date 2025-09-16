@@ -213,7 +213,7 @@ async def on_edit_pick_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📵 Número incorrecto", callback_data=f"SET:{abs_idx}:Número incorrecto"),
             InlineKeyboardButton("🕓 Contactar Luego", callback_data=f"SET:{abs_idx}:Contactar Luego"),
         ],
-        [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+        [InlineKeyboardButton("📱 Guardar contacto", callback_data="MENU:SENDCONTACTS")],
         [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
         [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME"),
          InlineKeyboardButton("↩️ Volver", callback_data=f"EDITPAGE:{context.user_data.get('edit_page',0)}")],
@@ -382,17 +382,19 @@ async def send_reserved_as_contacts(update: Update, context: ContextTypes.DEFAUL
             rows_to_send = [base_rows[sel_idx]]
     if not rows_to_send:
         return await q.edit_message_text("No tenés una tanda reservada ni un contacto seleccionado.")
-    for row in rows_to_send:
-        row = _pad_row(row, len(CSV_HEADERS))
-        first = row[IDX["Nombre"]]
-        last = row[IDX["Apellido"]]
-        phone = row[IDX["Teléfono"]]
-        if phone:
-            await context.bot.send_contact(
-                chat_id=q.message.chat_id,
-                phone_number=phone,
-                first_name=first or "Contacto",
-                last_name=last or ""
-            )
+    if not rows_to_send:
+        return await q.edit_message_text("No tenés una tanda reservada ni un contacto seleccionado.")
+    row = _pad_row(rows_to_send[0], len(CSV_HEADERS))
+    first = row[IDX["Nombre"]]
+    last = row[IDX["Apellido"]]
+    phone = row[IDX["Teléfono"]]
+    if not phone:
+        return await q.edit_message_text("El contacto seleccionado no tiene teléfono válido.")
+    await context.bot.send_contact(
+        chat_id=q.message.chat_id,
+        phone_number=phone,
+        first_name=first or "Contacto",
+        last_name=last or ""
+    )
     await q.answer()
 
