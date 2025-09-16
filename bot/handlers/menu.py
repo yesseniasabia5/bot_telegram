@@ -3,6 +3,7 @@ import os
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 
 from bot.auth import require_auth, get_display_for_uid
 from bot.config import USE_SHEETS, CSV_DEFAULT, CSV_HEADERS, IDX
@@ -31,7 +32,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user and update.effective_user.id in get_admin_ids():
         kb.append([InlineKeyboardButton("🔐 Administración", callback_data="MENU:ADMIN")])
 
-    text = f"Elegí una opción:\nBackend: *{backend}*"
+    text = f"Bienvenido!!"
     markup = InlineKeyboardMarkup(kb)
     if getattr(update, "callback_query", None):
         await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -58,15 +59,18 @@ async def on_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size = context.user_data.get("list_page_size", 10)
     if not rows:
         return await q.edit_message_text("No hay datos para paginar.")
-    return await show_rows_with_pagination(q, context, rows, title, page, size)
+    return await show_rows_with_pagination(
+        q, context, rows, title, page, size, allow_edit=context.user_data.get("list_allow_edit", True)
+    )
 
-async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0):
+async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0, allow_edit=True):
     context.user_data["list_rows"] = rows
     context.user_data["list_title"] = title
     context.user_data["list_page_size"] = page_size
-    return await show_rows_with_pagination(q, context, rows, title, page, page_size)
+    context.user_data["list_allow_edit"] = allow_edit
+    return await show_rows_with_pagination(q, context, rows, title, page, page_size, allow_edit=allow_edit)
 
-async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Resultados", page=0, page_size=10):
+async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Resultados", page=0, page_size=10, allow_edit=True):
     if not rows:
         return await q.edit_message_text(f"Sin resultados en *{title}*.", parse_mode="Markdown")
     pages = list(_chunk_rows(rows, page_size))
@@ -78,11 +82,17 @@ async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Re
     if page < len(pages)-1:
         kb.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"PAGE:{page+1}"))
     nav = [kb] if kb else []
-    # Botón para editar un contacto puntual de la lista actual
-    nav.append([InlineKeyboardButton("✏️ Editar un contacto de esta lista", callback_data=f"LISTEDIT:{page}")])
+    if allow_edit:
+        # Botón para editar un contacto puntual de la lista actual
+        nav.append([InlineKeyboardButton("✏️ Editar estado de un contacto", callback_data=f"LISTEDIT:{page}")])
     nav.append([InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body)
-    return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(nav), parse_mode="Markdown")
+    try:
+        return await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(nav), parse_mode="Markdown")
+    except BadRequest as exc:
+        if "Message is not modified" in str(exc):
+            return None
+        raise
 
 @require_auth
 async def on_list_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -95,6 +105,9 @@ async def on_list_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         page = 0
     rows = context.user_data.get("list_rows", [])
     title = context.user_data.get("list_title", "Resultados")
+    if not context.user_data.get("list_allow_edit", True):
+        kb = [[InlineKeyboardButton("Volver al menu", callback_data="MENU:HOME")]]
+        return await q.edit_message_text("Esta lista es solo de lectura.", reply_markup=InlineKeyboardMarkup(kb))
     # Configurar el editor con la lista completa y el tamaño de página usado en la vista de lista
     context.user_data["edit_base_rows"] = rows
     context.user_data["edit_page_size"] = context.user_data.get("list_page_size", 10)
@@ -189,7 +202,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "MENU:LISTA":
         rows = read_lista_any()
-        return await start_list_pagination(q, context, rows, title="Lista completa", page_size=10, page=0)
+        return await start_list_pagination(q, context, rows, title="Lista completa", page_size=10, page=0, allow_edit=False)
 
     if data.startswith("MENU:FILTRO:"):
         _, _, estado = data.split(":", 2)
@@ -200,7 +213,10 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not pendientes:
                 return await q.edit_message_text("No hay personas pendientes.")
             uid = update.effective_user.id if update.effective_user else 0
-            who =  (uid, update)
+            display = get_display_for_uid(uid, update)
+            who = str(uid)
+            if display and display != str(uid):
+                who = f"{uid} ({display})"
             to_assign = pendientes[:5]
             for r in to_assign:
                 # r es referencia a filas de all_rows (vienen de filter_by_status),
@@ -212,7 +228,6 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "\n".join(_format_persona(r) for r in to_assign)
             kb = [
                 [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
-                #[InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
                 [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
                 [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
                 [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],

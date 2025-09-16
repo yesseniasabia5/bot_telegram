@@ -23,24 +23,53 @@ def _estado_es_en_contacto(valor: str) -> bool:
     return _norm(valor).startswith("en contacto")
 
 
+def _find_row_by_keys(all_rows, target):
+    target = _pad_row(target, len(CSV_HEADERS))
+    tel = target[IDX["Teléfono"]].strip() if len(target) > IDX["Teléfono"] else ""
+    dni = target[IDX["DNI"]].strip() if len(target) > IDX["DNI"] else ""
+    for index, candidate in enumerate(all_rows):
+        padded = _pad_row(candidate, len(CSV_HEADERS))
+        if padded[IDX["Teléfono"]].strip() == tel or (dni and padded[IDX["DNI"]].strip() == dni):
+            return index, padded
+    return -1, None
+
+
+def _active_reserved_rows(context: ContextTypes.DEFAULT_TYPE, all_rows):
+    reserved = context.user_data.get("reserved_rows", [])
+    if not reserved:
+        return []
+    active = []
+    for cached in reserved:
+        idx, current = _find_row_by_keys(all_rows, cached)
+        if idx < 0 or current is None:
+            continue
+        estado = current[IDX["Estado"]]
+        if _estado_es_en_contacto(estado):
+            active.append(current)
+            all_rows[idx] = current
+    context.user_data["reserved_rows"] = active
+    return active
+
+
 def release_reservation(context: ContextTypes.DEFAULT_TYPE):
     """Devuelve a 'Pendiente' solo los reservados que aún están en 'En contacto*'."""
     reserved = context.user_data.get("reserved_rows", [])
     if reserved:
         all_rows = read_lista_any()
-        for r in reserved:
-            for rr in all_rows:
-                if rr[IDX["Teléfono"]] == r[IDX["Teléfono"]] or (
-                    r[IDX["DNI"]] and rr[IDX["DNI"]] == r[IDX["DNI"]]
-                ):
-                    if _estado_es_en_contacto(rr[IDX["Estado"]]):
-                        rr[IDX["Estado"]] = "Pendiente"
-                        rr[IDX["Observación"]] = ""
+        for cached in reserved:
+            idx, current = _find_row_by_keys(all_rows, cached)
+            if idx < 0 or current is None:
+                continue
+            if _estado_es_en_contacto(current[IDX["Estado"]]):
+                current[IDX["Estado"]] = "Pendiente"
+                current[IDX["Observación"]] = ""
+                all_rows[idx] = current
         set_lista_any(all_rows)
         context.user_data["reserved_rows"] = []
 
 
 # ==== Editor de Pendientes ====
+
 # IMPORTANTE: NO decorar con @require_auth — esta función recibe un CallbackQuery, no un Update
 async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar estado", page=0, page_size=5):
     total = len(rows)
@@ -65,9 +94,6 @@ async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar e
         nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"EDITPAGE:{page+1}"))
     if nav:
         kb_rows.append(nav)
-    kb_rows.append(#[InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
-                    [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")])
-    kb_rows.append([InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")])
     kb_rows.append([InlineKeyboardButton("↩️ Volver", callback_data="MENU:HOME"),
                     InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body_lines)
@@ -95,20 +121,8 @@ async def on_edit_pick_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
     base_rows = context.user_data.get("edit_base_rows", [])
     if not (0 <= abs_idx < len(base_rows)):
         return await q.edit_message_text("Índice inválido. Volvé a intentarlo desde el menú.")
-    # Si venimos desde "Ver lista", reservamos solo este contacto en caso de estar Pendiente
-    if context.user_data.get("edit_source") == "list":
-        current = _pad_row(base_rows[abs_idx], len(CSV_HEADERS))
-        if current[IDX["Estado"]] == "Pendiente":
-            uid = update.effective_user.id if update.effective_user else 0
-            who = get_display_for_uid(uid, update)
-            try:
-                update_estado_by_row_index(abs_index=abs_idx, nuevo_estado=f"En contacto - {who}", base_rows=base_rows)
-                # Refrescamos la base para reflejar el nuevo estado y mantener índices
-                base_rows = read_lista_any()
-                context.user_data["edit_base_rows"] = base_rows
-            except Exception:
-                # Si falla, seguimos sin bloquear la edición
-                pass
+    # Guardamos el índice seleccionado para acciones posteriores (enviar contacto/VCF)
+    context.user_data["edit_selected_idx"] = abs_idx
     persona = _format_persona(_pad_row(base_rows[abs_idx], len(CSV_HEADERS)))
     kb = [
         [
@@ -120,8 +134,7 @@ async def on_edit_pick_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📵 Número incorrecto", callback_data=f"SET:{abs_idx}:Número incorrecto"),
             InlineKeyboardButton("🕓 Contactar Luego", callback_data=f"SET:{abs_idx}:Contactar Luego"),
         ],
-        [InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
-         InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+        [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
         [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
         [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME"),
          InlineKeyboardButton("↩️ Volver", callback_data=f"EDITPAGE:{context.user_data.get('edit_page',0)}")],
@@ -156,12 +169,13 @@ async def on_edit_set_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     update_estado_by_row_index(abs_index=abs_idx, nuevo_estado=nuevo, base_rows=base_rows)
     source = context.user_data.get("edit_source", "pendientes")
+    all_rows = read_lista_any()
     if source == "list":
-        new_rows = read_lista_any()
+        new_rows = all_rows
         context.user_data["edit_title"] = context.user_data.get("edit_title", "Cambiar estado (Lista)")
         size = context.user_data.get("edit_page_size", 10)
     else:
-        new_rows = filter_by_status(read_lista_any(), "Pendiente")
+        new_rows = _active_reserved_rows(context, all_rows)
         context.user_data["edit_title"] = "Cambiar estado (Pendientes)"
         size = context.user_data.get("edit_page_size", 5)
     context.user_data["edit_base_rows"] = new_rows
@@ -196,12 +210,13 @@ async def obs_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_estado_by_row_index(abs_index=idx, nuevo_estado="Contactar Luego", base_rows=base_rows, observacion=obs)
     context.user_data.pop("obs_target_index", None)
     source = context.user_data.get("edit_source", "pendientes")
+    all_rows = read_lista_any()
     if source == "list":
-        new_rows = read_lista_any()
+        new_rows = all_rows
         context.user_data["edit_title"] = context.user_data.get("edit_title", "Cambiar estado (Lista)")
         size = context.user_data.get("edit_page_size", 10)
     else:
-        new_rows = filter_by_status(read_lista_any(), "Pendiente")
+        new_rows = _active_reserved_rows(context, all_rows)
         context.user_data["edit_title"] = "Cambiar estado (Pendientes)"
         size = context.user_data.get("edit_page_size", 5)
     context.user_data["edit_base_rows"] = new_rows
@@ -223,25 +238,31 @@ async def send_reserved_vcf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     reserved = context.user_data.get("reserved_rows", [])
 
-    # Fallbacks: editor actual o primeras 5 pendientes
-    if not reserved:
+    # Fallbacks: contacto seleccionado, editor actual o primeras 5 pendientes
+    rows_to_export = list(reserved)
+    if not rows_to_export:
+        base_rows = context.user_data.get("edit_base_rows", [])
+        sel_idx = context.user_data.get("edit_selected_idx")
+        if isinstance(sel_idx, int) and 0 <= sel_idx < len(base_rows):
+            rows_to_export = [base_rows[sel_idx]]
+    if not rows_to_export:
         edit_rows = context.user_data.get("edit_base_rows", [])
         page = context.user_data.get("edit_page", 0)
         size = context.user_data.get("edit_page_size", 5)
         if edit_rows:
             start = page * size
-            reserved = edit_rows[start:start + 5]
+            rows_to_export = edit_rows[start:start + 5]
         else:
             all_rows = read_lista_any()
             pendientes = filter_by_status(all_rows, "Pendiente")
-            reserved = pendientes[:5]
+            rows_to_export = pendientes[:5]
 
-    if not reserved:
+    if not rows_to_export:
         return await q.edit_message_text("No hay contactos disponibles para exportar.")
 
     buf = BytesIO()
     count = 0
-    for row in reserved:
+    for row in rows_to_export:
         row = _pad_row(row, len(CSV_HEADERS))
         nombre = row[IDX["Nombre"]].strip()
         telefono = row[IDX["Teléfono"]].strip()
@@ -263,7 +284,7 @@ async def send_reserved_vcf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await q.message.reply_document(
             document=InputFile(buf, filename),
-            caption="vCard con tus 5 pendientes reservados. Abrilo para importarlos a tus contactos."
+            caption="vCard con tus pendientes seleccionados. Abrilo para importarlos a tus contactos."
         )
     except Exception as e:
         return await q.edit_message_text(f"No se pudo enviar el VCF: {e}")
@@ -274,9 +295,15 @@ async def send_reserved_vcf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_reserved_as_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     reserved = context.user_data.get("reserved_rows", [])
-    if not reserved:
-        return await q.edit_message_text("No tenés una tanda reservada ahora.")
-    for row in reserved:
+    rows_to_send = list(reserved)
+    if not rows_to_send:
+        base_rows = context.user_data.get("edit_base_rows", [])
+        sel_idx = context.user_data.get("edit_selected_idx")
+        if isinstance(sel_idx, int) and 0 <= sel_idx < len(base_rows):
+            rows_to_send = [base_rows[sel_idx]]
+    if not rows_to_send:
+        return await q.edit_message_text("No tenés una tanda reservada ni un contacto seleccionado.")
+    for row in rows_to_send:
         row = _pad_row(row, len(CSV_HEADERS))
         first = row[IDX["Nombre"]]
         last = row[IDX["Apellido"]]
@@ -289,3 +316,4 @@ async def send_reserved_as_contacts(update: Update, context: ContextTypes.DEFAUL
                 last_name=last or ""
             )
     await q.answer()
+

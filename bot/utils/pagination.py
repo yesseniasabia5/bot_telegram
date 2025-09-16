@@ -8,6 +8,16 @@ def _clean_estado_for_display(est: str) -> str:
     if not est:
         return est
     s = est.strip()
+    # Formato preferido: 'En contacto - <id> (<nombre>)' o sin nombre
+    m = re.match(r"^En contacto\s*[-–—]\s*(\d{5,})(?:\s*\(([^)]+)\))?", s)
+    if m:
+        nombre = m.group(2).strip() if m.group(2) else ""
+        return f"En contacto - {m.group(1)} ({nombre})" if nombre else f"En contacto - {m.group(1)}"
+    # Alternativa con guiones: 'En contacto - <id> - <nombre>'
+    m = re.match(r"^En contacto\s*[-–—]\s*(\d{5,})\s*[-–—]\s*(.+)", s)
+    if m:
+        nombre = m.group(2).strip()
+        return f"En contacto - {m.group(1)} ({nombre})" if nombre else f"En contacto - {m.group(1)}"
     # Casos corruptos: "En contacto - (6415..., Update(...))" o "En contacto - 6415..., Update(...)"
     m = re.match(r"^En contacto\s*[-–—]\s*\((\d{5,})\b.*", s)
     if m:

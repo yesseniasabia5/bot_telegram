@@ -68,7 +68,9 @@ async def add_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ Contacto {verb}\n\n{_format_persona(row)}",
         parse_mode="Markdown", reply_markup=ReplyKeyboardRemove()
     )
-    return await cmd_menu(update, context)
+    # Volvemos al menú y cerramos la conversación
+    await cmd_menu(update, context)
+    return ConversationHandler.END
 
 async def add_estado_observacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("await_add_obs"):
@@ -84,7 +86,8 @@ async def add_estado_observacion(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode="Markdown", reply_markup=ReplyKeyboardRemove()
     )
     context.user_data.pop("await_add_obs", None)
-    return await cmd_menu(update, context)
+    await cmd_menu(update, context)
+    return ConversationHandler.END
 
 async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[InlineKeyboardButton("✅ Sí, cancelar", callback_data="CANCEL:CONFIRM"),
@@ -98,10 +101,12 @@ async def on_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await q.answer()
     if q.data == "CANCEL:CONFIRM":
         release_reservation(context)
-        return await cmd_menu(update, context)
+        await cmd_menu(update, context)
+        return ConversationHandler.END
     else:
         await q.edit_message_text("Continuemos. Repetí el dato anterior.")
-        return ConversationHandler.WAITING
+        # Seguimos en el estado actual esperando el dato anterior
+        return ConversationHandler.END
 
 def build_add_conv():
     return ConversationHandler(
@@ -123,5 +128,5 @@ def build_add_conv():
         fallbacks=[CommandHandler("cancel", add_cancel)],
         name="add_contact_conv",
         persistent=False,
+        allow_reentry=True,
     )
-

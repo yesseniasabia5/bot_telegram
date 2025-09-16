@@ -805,8 +805,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = "\n".join(_format_persona(r) for r in to_assign)
             kb = [
                 [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
-                [InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
-                 InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+                [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
                 [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
                 [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
             ]
@@ -868,8 +867,7 @@ async def show_editable_list(q, context, rows: List[List[str]], title="Cambiar e
         nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"EDITPAGE:{page+1}"))
     if nav:
         kb_rows.append(nav)
-    kb_rows.append([InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
-                    InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")])
+    kb_rows.append([InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")])
     kb_rows.append([InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")])
     kb_rows.append([InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body_lines)
@@ -905,8 +903,7 @@ async def on_edit_pick_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📵 Número incorrecto", callback_data=f"SET:{abs_idx}:Número incorrecto"),
             InlineKeyboardButton("🕓 Contactar Luego", callback_data=f"SET:{abs_idx}:Contactar Luego"),
         ],
-        [InlineKeyboardButton("📥 Guardar 5 (VCF)", callback_data="MENU:SAVE5"),
-         InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
+        [InlineKeyboardButton("📱 Enviar como contactos", callback_data="MENU:SENDCONTACTS")],
         [InlineKeyboardButton("🧹 Cancelar y liberar", callback_data="MENU:CANCEL_RESERVA")],
         [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME"),
          InlineKeyboardButton("↩️ Volver", callback_data=f"EDITPAGE:{context.user_data.get('edit_page',0)}")],
