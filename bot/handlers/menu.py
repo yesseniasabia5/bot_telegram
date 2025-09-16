@@ -43,47 +43,77 @@ def _matches_key(row, key) -> bool:
     return False
 
 
+def _pending_positions(all_rows: List[List[str]]):
+    positions = []
+    for idx, row in enumerate(all_rows):
+        padded = _pad_row(row, len(CSV_HEADERS))
+        if padded[IDX["Estado"]] == "Pendiente":
+            positions.append((idx, padded))
+    return positions
+
+
 def _reserve_pendientes_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, limit: int = 5) -> List[List[str]]:
+    preferred_indices = context.user_data.get("pending_preview_indices") or []
     preferred_keys = context.user_data.get("pending_preview_keys") or []
     all_rows = read_lista_any()
-    pendientes = filter_by_status(all_rows, "Pendiente")
-    if not pendientes:
+    pending_positions = _pending_positions(all_rows)
+    if not pending_positions:
         return []
-    max_items = min(limit, len(pendientes)) if limit else len(pendientes)
-    selected = []
-    used_indexes = set()
-    for key in preferred_keys:
-        for idx, row in enumerate(pendientes):
-            if idx in used_indexes:
-                continue
-            if _matches_key(row, key):
-                selected.append(row)
-                used_indexes.add(idx)
-                if len(selected) >= max_items:
-                    break
-        if len(selected) >= max_items:
+    max_items = min(limit, len(pending_positions)) if limit else len(pending_positions)
+    selected_indices: List[int] = []
+    used = set()
+
+    def try_add_index(abs_idx: int) -> bool:
+        if abs_idx in used or not (0 <= abs_idx < len(all_rows)):
+            return False
+        padded = _pad_row(all_rows[abs_idx], len(CSV_HEADERS))
+        if padded[IDX["Estado"]] != "Pendiente":
+            return False
+        used.add(abs_idx)
+        selected_indices.append(abs_idx)
+        return True
+
+    for abs_idx in preferred_indices:
+        if len(selected_indices) >= max_items:
             break
-    if len(selected) < max_items:
-        for idx, row in enumerate(pendientes):
-            if idx in used_indexes:
-                continue
-            selected.append(row)
-            used_indexes.add(idx)
-            if len(selected) >= max_items:
+        try_add_index(abs_idx)
+
+    if len(selected_indices) < max_items and preferred_keys:
+        for key in preferred_keys:
+            if len(selected_indices) >= max_items:
                 break
-    if not selected:
+            for abs_idx, row in pending_positions:
+                if abs_idx in used:
+                    continue
+                if _matches_key(row, key) and try_add_index(abs_idx):
+                    break
+
+    if len(selected_indices) < max_items:
+        for abs_idx, _ in pending_positions:
+            if len(selected_indices) >= max_items:
+                break
+            try_add_index(abs_idx)
+
+    if not selected_indices:
         return []
+
     who = _current_user_label(update)
-    for row in selected:
-        if len(row) < len(CSV_HEADERS):
-            row.extend([""] * (len(CSV_HEADERS) - len(row)))
-        row[IDX["Estado"]] = f"En contacto - {who}"
-        row[IDX["Observación"]] = ""
+    context.user_data["reserved_owner"] = who
+    selected_rows: List[List[str]] = []
+    for abs_idx in selected_indices:
+        padded = _pad_row(all_rows[abs_idx], len(CSV_HEADERS))
+        padded[IDX["Estado"]] = f"En contacto - {who}"
+        padded[IDX["Observación"]] = ""
+        all_rows[abs_idx] = padded
+        selected_rows.append(padded)
+
     set_lista_any(all_rows)
-    context.user_data["reserved_rows"] = selected
+    context.user_data["reserved_rows"] = selected_rows
+    context.user_data["reserved_indices"] = selected_indices
     context.user_data.pop("pending_preview_keys", None)
     context.user_data.pop("pending_preview_limit", None)
-    return selected
+    context.user_data.pop("pending_preview_indices", None)
+    return selected_rows
 
 
 @require_auth
@@ -283,8 +313,16 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if estado == "Pendiente":
             reserved = context.user_data.get("reserved_rows") or []
             if reserved:
+                if not context.user_data.get("reserved_owner"):
+                    try:
+                        first_estado = _pad_row(reserved[0], len(CSV_HEADERS))[IDX["Estado"]].strip()
+                    except Exception:
+                        first_estado = ""
+                    if first_estado.startswith("En contacto - "):
+                        context.user_data["reserved_owner"] = first_estado.split("En contacto - ", 1)[1].strip()
                 context.user_data.pop("pending_preview_keys", None)
                 context.user_data.pop("pending_preview_limit", None)
+                context.user_data.pop("pending_preview_indices", None)
                 msg = "\n".join(_format_persona(r) for r in reserved)
                 kb = [
                     [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],
@@ -297,12 +335,17 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(kb),
                 )
             all_rows = read_lista_any()
-            pendientes = filter_by_status(all_rows, "Pendiente")
-            if not pendientes:
+            pending_positions = _pending_positions(all_rows)
+            if not pending_positions:
+                context.user_data.pop("reserved_owner", None)
+                context.user_data.pop("pending_preview_indices", None)
                 return await q.edit_message_text("No hay personas pendientes.")
-            preview = pendientes[:5]
+            preview_positions = pending_positions[:5]
+            preview = [row for _, row in preview_positions]
             context.user_data["pending_preview_keys"] = [_row_key(r) for r in preview]
+            context.user_data["pending_preview_indices"] = [idx for idx, _ in preview_positions]
             context.user_data["pending_preview_limit"] = len(preview)
+            context.user_data.pop("reserved_owner", None)
             msg = "\n".join(_format_persona(r) for r in preview)
             kb = [
                 [InlineKeyboardButton("✏️ Editar esta tanda", callback_data="MENU:EDIT")],

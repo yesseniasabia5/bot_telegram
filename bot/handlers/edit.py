@@ -36,36 +36,108 @@ def _find_row_by_keys(all_rows, target):
 
 def _active_reserved_rows(context: ContextTypes.DEFAULT_TYPE, all_rows):
     reserved = context.user_data.get("reserved_rows", [])
-    if not reserved:
+    reserved_indices = context.user_data.get("reserved_indices") or []
+    if not reserved and not reserved_indices:
         return []
-    active = []
-    for cached in reserved:
-        idx, current = _find_row_by_keys(all_rows, cached)
-        if idx < 0 or current is None:
-            continue
-        estado = current[IDX["Estado"]]
-        if _estado_es_en_contacto(estado):
-            active.append(current)
+    owner = context.user_data.get("reserved_owner")
+    active_rows = []
+    active_indices = []
+
+    def _include_by_index(abs_idx: int) -> None:
+        nonlocal owner
+        if not (0 <= abs_idx < len(all_rows)):
+            return
+        padded = _pad_row(all_rows[abs_idx], len(CSV_HEADERS))
+        estado = padded[IDX["Estado"]].strip()
+        if not _estado_es_en_contacto(estado):
+            return
+        if owner:
+            if not estado.startswith(f"En contacto - {owner}"):
+                return
+        else:
+            if estado.startswith("En contacto - "):
+                owner = estado.split("En contacto - ", 1)[1].strip()
+                context.user_data["reserved_owner"] = owner
+        active_rows.append(padded)
+        active_indices.append(abs_idx)
+        all_rows[abs_idx] = padded
+
+    for abs_idx in reserved_indices:
+        _include_by_index(abs_idx)
+
+    if not active_rows and reserved:
+        for cached in reserved:
+            idx, current = _find_row_by_keys(all_rows, cached)
+            if idx < 0 or current is None:
+                continue
             all_rows[idx] = current
-    context.user_data["reserved_rows"] = active
-    return active
+            _include_by_index(idx)
+
+    context.user_data["reserved_rows"] = active_rows
+    context.user_data["reserved_indices"] = active_indices
+    if not active_rows:
+        context.user_data.pop("reserved_owner", None)
+    return active_rows
 
 
 def release_reservation(context: ContextTypes.DEFAULT_TYPE):
     """Devuelve a 'Pendiente' solo los reservados que aún están en 'En contacto*'."""
     reserved = context.user_data.get("reserved_rows", [])
+    reserved_indices = context.user_data.get("reserved_indices") or []
+    if not reserved and not reserved_indices:
+        context.user_data.pop("reserved_owner", None)
+        context.user_data.pop("reserved_indices", None)
+        return
+    owner = context.user_data.get("reserved_owner")
+    all_rows = read_lista_any()
+    changed = False
+    processed = set()
+
+    def _release_at_index(abs_idx, owner_hint):
+        nonlocal owner, changed
+        if abs_idx in processed or not (0 <= abs_idx < len(all_rows)):
+            return
+        padded = _pad_row(all_rows[abs_idx], len(CSV_HEADERS))
+        estado_actual = padded[IDX["Estado"]].strip()
+        if not _estado_es_en_contacto(estado_actual):
+            return
+        current_owner = owner_hint or owner
+        if current_owner:
+            if not estado_actual.startswith(f"En contacto - {current_owner}"):
+                return
+        else:
+            if estado_actual.startswith("En contacto - "):
+                current_owner = estado_actual.split("En contacto - ", 1)[1].strip()
+                owner = current_owner
+                context.user_data["reserved_owner"] = current_owner
+        padded[IDX["Estado"]] = "Pendiente"
+        padded[IDX["Observación"]] = ""
+        all_rows[abs_idx] = padded
+        processed.add(abs_idx)
+        changed = True
+
+    for abs_idx in reserved_indices:
+        _release_at_index(abs_idx, owner)
+
     if reserved:
-        all_rows = read_lista_any()
         for cached in reserved:
             idx, current = _find_row_by_keys(all_rows, cached)
-            if idx < 0 or current is None:
+            if idx < 0 or current is None or idx in processed:
                 continue
-            if _estado_es_en_contacto(current[IDX["Estado"]]):
-                current[IDX["Estado"]] = "Pendiente"
-                current[IDX["Observación"]] = ""
-                all_rows[idx] = current
+            owner_hint = owner
+            if not owner_hint:
+                cached_padded = _pad_row(cached, len(CSV_HEADERS))
+                cached_estado = cached_padded[IDX["Estado"]].strip()
+                if cached_estado.startswith("En contacto - "):
+                    owner_hint = cached_estado.split("En contacto - ", 1)[1].strip()
+            all_rows[idx] = current
+            _release_at_index(idx, owner_hint)
+
+    if changed:
         set_lista_any(all_rows)
-        context.user_data["reserved_rows"] = []
+    context.user_data["reserved_rows"] = []
+    context.user_data.pop("reserved_owner", None)
+    context.user_data.pop("reserved_indices", None)
 
 
 # ==== Editor de Pendientes ====
