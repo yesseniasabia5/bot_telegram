@@ -43,6 +43,46 @@ def _matches_key(row, key) -> bool:
     return False
 
 
+def _filter_rows_by_estado(rows, estado):
+    filtered = []
+    for idx, row in enumerate(rows):
+        padded = _pad_row(row, len(CSV_HEADERS))
+        if padded[IDX["Estado"]] == estado:
+            filtered.append((idx, padded))
+    return filtered
+
+
+def _reserve_estado_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, estado: str, limit: int = 5):
+    all_rows = read_lista_any()
+    matches = _filter_rows_by_estado(all_rows, estado)
+    if not matches:
+        return []
+    selected = []
+    for abs_idx, _ in matches[:limit]:
+        padded = _pad_row(all_rows[abs_idx], len(CSV_HEADERS))
+        padded[IDX["Estado"]] = f"En contacto - {_current_user_label(update)}"
+        padded[IDX["Observación"]] = ""
+        all_rows[abs_idx] = padded
+        selected.append(padded)
+    set_lista_any(all_rows)
+    context.user_data["reserved_rows"] = selected
+    context.user_data["reserved_owner"] = _current_user_label(update)
+    return selected
+
+    if not key:
+        return False
+    padded = _pad_row(row, len(CSV_HEADERS))
+    tel = padded[IDX["Teléfono"]].strip()
+    dni = padded[IDX["DNI"]].strip()
+    key_tel = (key.get("tel") or "").strip()
+    key_dni = (key.get("dni") or "").strip()
+    if key_tel and tel == key_tel:
+        return True
+    if key_dni and dni == key_dni:
+        return True
+    return False
+
+
 def _pending_positions(all_rows: List[List[str]]):
     positions = []
     for idx, row in enumerate(all_rows):
@@ -126,6 +166,9 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 Ver lista", callback_data="MENU:LISTA")],
         [
             InlineKeyboardButton("🟡 Pendientes", callback_data="MENU:FILTRO:Pendiente"),
+            InlineKeyboardButton("🟠 Contactar Luego", callback_data="MENU:FILTRO:ContactarLuego"),
+        ],
+        [
             InlineKeyboardButton("🟢 Aceptados", callback_data="MENU:FILTRO:Aceptado"),
             InlineKeyboardButton("🔴 Rechazados", callback_data="MENU:FILTRO:Rechazado"),
         ],
@@ -364,7 +407,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await q.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(kb))
         else:
             rows = filter_by_status(read_lista_any(), estado)
-            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0)
+            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0, allow_edit=False)
 
     if data == "MENU:SAVE5":
         from bot.handlers.edit import send_reserved_vcf
