@@ -167,10 +167,10 @@ async def on_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         return await q.edit_message_text("No hay datos para paginar.")
     return await show_rows_with_pagination(
-        q, context, rows, title, page, size, allow_edit=context.user_data.get("list_allow_edit", True)
+        q, context, rows, title, page, size, allow_edit=context.user_data.get("list_allow_edit", False)
     )
 
-async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0, allow_edit=True):
+async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0, allow_edit=False):
     context.user_data["list_rows"] = rows
     context.user_data["list_title"] = title
     context.user_data["list_page_size"] = page_size
@@ -190,9 +190,6 @@ async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Re
     if page < len(pages)-1:
         kb.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"PAGE:{page+1}"))
     nav = [kb] if kb else []
-    if allow_edit:
-        # Botón para editar un contacto puntual de la lista actual
-        nav.append([InlineKeyboardButton("✏️ Editar estado de un contacto", callback_data=f"LISTEDIT:{page}")])
     nav.append([InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body)
     try:
@@ -364,7 +361,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await q.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(kb))
         else:
             rows = filter_by_status(read_lista_any(), estado)
-            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0)
+            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0, allow_edit=False)
 
     if data == "MENU:SAVE5":
         from bot.handlers.edit import send_reserved_vcf
