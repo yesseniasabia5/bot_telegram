@@ -6,6 +6,9 @@ from bot.states import ADM_ADD_ID, ADM_DEL_ID, ADM_ADM_ADD_ID, ADM_ADM_DEL_ID
 from bot.config import SHEET_ALLOWED, SHEET_ADMINS
 from bot.services.roles import _append_id_name_to_sheet, _remove_id_from_sheet
 
+
+ADMIN_BACK_KB = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ Volver al panel", callback_data="MENU:ADMIN")]])
+
 @require_admin
 async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -84,7 +87,7 @@ async def admin_add_id_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = " ".join(parts[1:]).strip() if len(parts) > 1 else ""
     _append_id_name_to_sheet(SHEET_ALLOWED, uid, name)
     shown = f"{uid} - {name}" if name else str(uid)
-    await update.message.reply_text(f"✅ Agregado a usuarios permitidos: {shown}")
+    await update.message.reply_text(f"✅ Agregado a usuarios permitidos: {shown}", reply_markup=ADMIN_BACK_KB)
     return ConversationHandler.END
 
 @require_admin
@@ -96,9 +99,9 @@ async def admin_del_id_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = int(text)
     ok = _remove_id_from_sheet(SHEET_ALLOWED, uid)
     if ok:
-        await update.message.reply_text(f"✅ Quitado de usuarios permitidos: {uid}")
+        await update.message.reply_text(f"✅ Quitado de usuarios permitidos: {uid}", reply_markup=ADMIN_BACK_KB)
     else:
-        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Usuarios permitidos.")
+        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Usuarios permitidos.", reply_markup=ADMIN_BACK_KB)
     return ConversationHandler.END
 
 @require_admin
@@ -115,7 +118,7 @@ async def admin_add_admin_text(update: Update, context: ContextTypes.DEFAULT_TYP
     name = " ".join(parts[1:]).strip() if len(parts) > 1 else ""
     _append_id_name_to_sheet(SHEET_ADMINS, uid, name)
     shown = f"{uid} - {name}" if name else str(uid)
-    await update.message.reply_text(f"✅ Agregado a Admins: {shown}")
+    await update.message.reply_text(f"✅ Agregado a Admins: {shown}", reply_markup=ADMIN_BACK_KB)
     return ConversationHandler.END
 
 @require_admin
@@ -127,8 +130,8 @@ async def admin_del_admin_text(update: Update, context: ContextTypes.DEFAULT_TYP
     uid = int(text)
     ok = _remove_id_from_sheet(SHEET_ADMINS, uid)
     if ok:
-        await update.message.reply_text(f"✅ Quitado de Admins: {uid}")
+        await update.message.reply_text(f"✅ Quitado de Admins: {uid}", reply_markup=ADMIN_BACK_KB)
     else:
-        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Admins.")
+        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Admins.", reply_markup=ADMIN_BACK_KB)
     return ConversationHandler.END
 
