@@ -17,7 +17,7 @@ def auth_is_locked() -> bool:
     return bool(get_admin_ids() or get_allowed_ids())
 
 def get_display_for_uid(uid: int, update: Optional[Update] = None) -> str:
-    """Nombre para mostrar: primero Sheet (Allowed/Admins), luego username/full_name si está en el update, sino uid."""
+    """Nombre para mostrar: primero Sheet (Usuarios permitidos/Admins), luego username/full_name si está en el update, sino uid."""
     m = get_allowed_map()
     if uid in m and m[uid]:
         return m[uid]

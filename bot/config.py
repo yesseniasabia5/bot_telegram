@@ -35,6 +35,6 @@ CSV_DEFAULT = os.environ.get("LISTA_CSV", "lista.csv").strip() or "lista.csv"
 USE_SHEETS = os.environ.get("USE_SHEETS", "1").strip() != "0"
 
 # Sheets tabs for roles
-SHEET_ALLOWED = os.environ.get("SHEET_ALLOWED", "Allowed").strip() or "Allowed"
+SHEET_ALLOWED = os.environ.get("SHEET_ALLOWED", "Usuarios permitidos").strip() or "Usuarios permitidos"
 SHEET_ADMINS = os.environ.get("SHEET_ADMINS", "Admins").strip() or "Admins"
 

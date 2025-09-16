@@ -3,7 +3,7 @@
 # Estados conversación /add
 ADD_NOMBRE, ADD_APELLIDO, ADD_TELEFONO, ADD_DNI, ADD_ESTADO, ADD_CANCEL_CONFIRM = range(6)
 
-# Estados conversación administración (Allowed)
+# Estados conversación administración (Usuarios permitidos)
 ADM_ADD_ID, ADM_DEL_ID = range(6, 8)
 
 # Estados conversación administración (Admins)

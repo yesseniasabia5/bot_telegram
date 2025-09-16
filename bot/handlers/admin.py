@@ -62,9 +62,9 @@ async def admin_cancel_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👑 Ver Admins", callback_data="ADMIN:ADM_LIST")],
         [InlineKeyboardButton("➕ Agregar Admin", callback_data="ADMIN:ADM_ADD")],
         [InlineKeyboardButton("➖ Quitar Admin", callback_data="ADMIN:ADM_DEL")],
-        [InlineKeyboardButton("👥 Ver Allowed", callback_data="ADMIN:LIST")],
-        [InlineKeyboardButton("➕ Agregar ID Allowed", callback_data="ADMIN:ADD")],
-        [InlineKeyboardButton("➖ Quitar ID Allowed", callback_data="ADMIN:DEL")],
+        [InlineKeyboardButton("👥 Ver usuarios permitidos", callback_data="ADMIN:LIST")],
+        [InlineKeyboardButton("➕ Agregar ID usuarios permitidos", callback_data="ADMIN:ADD")],
+        [InlineKeyboardButton("➖ Quitar ID usuarios permitidos", callback_data="ADMIN:DEL")],
         [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
     ]
     await q.message.reply_text("🔐 Panel de administración", reply_markup=InlineKeyboardMarkup(kb))
@@ -84,7 +84,7 @@ async def admin_add_id_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = " ".join(parts[1:]).strip() if len(parts) > 1 else ""
     _append_id_name_to_sheet(SHEET_ALLOWED, uid, name)
     shown = f"{uid} - {name}" if name else str(uid)
-    await update.message.reply_text(f"✅ Agregado a Allowed: {shown}")
+    await update.message.reply_text(f"✅ Agregado a usuarios permitidos: {shown}")
     return ConversationHandler.END
 
 @require_admin
@@ -96,9 +96,9 @@ async def admin_del_id_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = int(text)
     ok = _remove_id_from_sheet(SHEET_ALLOWED, uid)
     if ok:
-        await update.message.reply_text(f"✅ Quitado de Allowed: {uid}")
+        await update.message.reply_text(f"✅ Quitado de usuarios permitidos: {uid}")
     else:
-        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Allowed.")
+        await update.message.reply_text(f"ℹ️ El ID {uid} no estaba en Usuarios permitidos.")
     return ConversationHandler.END
 
 @require_admin

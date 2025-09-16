@@ -85,7 +85,7 @@ def get_admins_map() -> Dict[int, str]:
 
 
 def get_allowed_map() -> Dict[int, str]:
-    """Allowed = Admins ∪ AllowedSheet ∪ ALLOWED_USER_IDS (.env)."""
+    """Usuarios permitidos = Admins ∪ hoja Usuarios permitidos ∪ ALLOWED_USER_IDS (.env)."""
     env_allowed = {int(x): "" for x in os.environ.get("ALLOWED_USER_IDS", "").split(",") if x.strip().isdigit()}
     sheet_allowed = _cached_sheet_ids(SHEET_ALLOWED, _ALLOWED_CACHE) if USE_SHEETS else {}
     all_allowed = get_admins_map()
@@ -102,4 +102,3 @@ def get_admin_ids() -> set[int]:
 
 def get_allowed_ids() -> set[int]:
     return set(get_allowed_map().keys())
-

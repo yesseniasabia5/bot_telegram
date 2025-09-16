@@ -167,10 +167,10 @@ async def on_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         return await q.edit_message_text("No hay datos para paginar.")
     return await show_rows_with_pagination(
-        q, context, rows, title, page, size, allow_edit=context.user_data.get("list_allow_edit", False)
+        q, context, rows, title, page, size, allow_edit=context.user_data.get("list_allow_edit", True)
     )
 
-async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0, allow_edit=False):
+async def start_list_pagination(q, context, rows: List[List[str]], title: str, page_size=10, page=0, allow_edit=True):
     context.user_data["list_rows"] = rows
     context.user_data["list_title"] = title
     context.user_data["list_page_size"] = page_size
@@ -190,6 +190,9 @@ async def show_rows_with_pagination(q, context, rows: List[List[str]], title="Re
     if page < len(pages)-1:
         kb.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"PAGE:{page+1}"))
     nav = [kb] if kb else []
+    if allow_edit:
+        # Botón para editar un contacto puntual de la lista actual
+        nav.append([InlineKeyboardButton("✏️ Editar estado de un contacto", callback_data=f"LISTEDIT:{page}")])
     nav.append([InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")])
     text = f"*{title}* (página {page+1}/{len(pages)}):\n\n" + "\n".join(body)
     try:
@@ -244,9 +247,9 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("👑 Ver Admins", callback_data="ADMIN:ADM_LIST")],
             [InlineKeyboardButton("➕ Agregar Admin", callback_data="ADMIN:ADM_ADD")],
             [InlineKeyboardButton("➖ Quitar Admin", callback_data="ADMIN:ADM_DEL")],
-            [InlineKeyboardButton("👥 Ver Allowed", callback_data="ADMIN:LIST")],
-            [InlineKeyboardButton("➕ Agregar ID Allowed", callback_data="ADMIN:ADD")],
-            [InlineKeyboardButton("➖ Quitar ID Allowed", callback_data="ADMIN:DEL")],
+            [InlineKeyboardButton("👥 Ver usuarios permitidos", callback_data="ADMIN:LIST")],
+            [InlineKeyboardButton("➕ Agregar ID usuarios permitidos", callback_data="ADMIN:ADD")],
+            [InlineKeyboardButton("➖ Quitar ID usuarios permitidos", callback_data="ADMIN:DEL")],
             [InlineKeyboardButton("🏠 Menú", callback_data="MENU:HOME")],
         ]
         return await q.edit_message_text("🔐 Panel de administración", reply_markup=InlineKeyboardMarkup(kb))
@@ -268,15 +271,15 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ADMIN:ADM_DEL":
         return await admin_del_admin_start(update, context)
 
-    # --- Allowed panel actions ---
+    # --- Usuarios permitidos panel actions ---
     if data == "ADMIN:LIST":
         if not (update.effective_user and update.effective_user.id in get_admin_ids()):
             return await q.edit_message_text("⛔ Solo administradores.")
         amap = get_allowed_map()
         if not amap:
-            return await q.edit_message_text("Allowed vacío (el bot está libre).")
+            return await q.edit_message_text("Usuarios permitidos vacio (el bot esta libre).")
         lines = [f"• {uid} - {name}" if name else f"• {uid}" for uid, name in sorted(amap.items())]
-        txt = "Allowed IDs:\n" + "\n".join(lines)
+        txt = "Usuarios permitidos:\n" + "\n".join(lines)
         kb = [[InlineKeyboardButton("⬅️ Volver", callback_data="MENU:ADMIN")]]
         return await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
@@ -361,7 +364,7 @@ async def on_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await q.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(kb))
         else:
             rows = filter_by_status(read_lista_any(), estado)
-            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0, allow_edit=False)
+            return await start_list_pagination(q, context, rows, title=f"{estado}s", page_size=10, page=0)
 
     if data == "MENU:SAVE5":
         from bot.handlers.edit import send_reserved_vcf
